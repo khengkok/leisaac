@@ -19,7 +19,7 @@ def init_action_cfg(action_cfg, device):
             joint_names=["gripper"],
             scale=1.0,
         )
-    elif device in ["keyboard", "gamepad", "lekiwi-keyboard", "lekiwi-gamepad"]:
+    elif device in ["keyboard", "gamepad", "pico", "lekiwi-keyboard", "lekiwi-gamepad"]:
         action_cfg.arm_action = mdp.DifferentialInverseKinematicsActionCfg(
             asset_name="robot",
             joint_names=["shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"],
@@ -169,7 +169,9 @@ def preprocess_device_action(action: dict[str, Any], teleop_device) -> torch.Ten
         processed_action = convert_action_from_so101_leader(
             action["joint_state"], action["motor_limits"], teleop_device
         )
-    elif action.get("keyboard") is not None or action.get("gamepad") is not None:
+    elif (
+        action.get("keyboard") is not None or action.get("gamepad") is not None or action.get("pico") is not None
+    ):
         processed_action = torch.zeros(teleop_device.env.num_envs, 8, device=teleop_device.env.device)
         processed_action[:, :] = action["joint_state"]
     elif action.get("bi_so101_leader") is not None:

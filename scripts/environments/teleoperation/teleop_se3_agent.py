@@ -25,6 +25,7 @@ parser.add_argument(
     choices=[
         "keyboard",
         "gamepad",
+        "pico",
         "so101leader",
         "bi-so101leader",
         "lekiwi-keyboard",
@@ -41,8 +42,8 @@ parser.add_argument(
     type=str,
     default=None,
     help=(
-        "ZMQ endpoint for remote so101leader (e.g. tcp://192.168.1.10:5556). Uses so101_joint_state_server.py on the"
-        " remote machine."
+        "ZMQ endpoint for remote so101leader (e.g. tcp://192.168.1.10:5556) or remote pico controller (e.g."
+        " tcp://192.168.1.10:5557). Uses so101_joint_state_server.py or pico_pose_server.py on the remote machine."
     ),
 )
 parser.add_argument(
@@ -263,6 +264,12 @@ def main():  # noqa: C901
             from leisaac.devices import SO101Leader
 
             teleop_interface = SO101Leader(env, port=args_cli.port, recalibrate=args_cli.recalibrate)
+    elif args_cli.teleop_device == "pico":
+        from leisaac.devices import SO101PicoController
+
+        teleop_interface = SO101PicoController(
+            env, endpoint=args_cli.remote_endpoint or "tcp://localhost:5557", sensitivity=args_cli.sensitivity
+        )
     elif args_cli.teleop_device == "bi-so101leader":
         from leisaac.devices import BiSO101Leader
 
@@ -283,8 +290,8 @@ def main():  # noqa: C901
         teleop_interface = LeKiwiGamepad(env, sensitivity=args_cli.sensitivity)
     else:
         raise ValueError(
-            f"Invalid device interface '{args_cli.teleop_device}'. Supported: 'keyboard', 'gamepad', 'so101leader',"
-            " 'bi-so101leader', 'lekiwi-keyboard', 'lekiwi-leader', 'lekiwi-gamepad'."
+            f"Invalid device interface '{args_cli.teleop_device}'. Supported: 'keyboard', 'gamepad', 'pico',"
+            " 'so101leader', 'bi-so101leader', 'lekiwi-keyboard', 'lekiwi-leader', 'lekiwi-gamepad'."
         )
 
     # add teleoperation key for env reset
