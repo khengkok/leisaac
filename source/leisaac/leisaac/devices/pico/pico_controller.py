@@ -79,10 +79,11 @@ class SO101PicoController(Device):
     """A Pico 4 Ultra controller for sending SE(3) commands as delta poses for so101 single arm.
 
     Controls:
-        Hold GRIP  - engage tracking (clutch). While held, moving/rotating the
-                     controller moves/rotates the gripper by the same delta,
-                     scaled by ``sensitivity``. Release GRIP to reposition your
-                     hand without moving the robot.
+        Hold GRIP  - engage tracking (clutch). While held, moving the controller
+                     moves the gripper; tilting/rolling your wrist orients the
+                     gripper; turning your wrist left/right (yaw about the room's
+                     up axis) turns the base (shoulder_pan) instead. Release GRIP
+                     to reposition your hand without moving the robot.
         TRIGGER    - gripper close (squeezed) / open (released), proportional
                      to how far the trigger is moved each tick.
         B / R / N  - same as every other device (start / reset-fail / reset-success).
@@ -253,6 +254,20 @@ class SO101PicoController(Device):
         local_delta_quat = _quat_multiply(_quat_conjugate(self._ref_quat), quat)
         local_delta_rot = _quat_to_euler_xyz(local_delta_quat)
 
+        # unlike dx/dy/dz and the wrist orientation below, shoulder_pan is a plain
+        # relative JOINT command (RelativeJointPositionActionCfg reads action[6]
+        # directly, see action_process.py) -- it never goes through
+        # _convert_delta_from_frame, so it must be set here explicitly or it stays
+        # zero forever regardless of controller motion (the bug that made shoulder_pan
+        # never respond). Rotation about the controller's own local UP axis -- i.e.
+        # "turn your wrist left/right" -- is what should drive it. OpenVR/WebXR
+        # controller-local axes are Y-up (not Z-up like aircraft convention), so that
+        # component is local_delta_rot[1], not local_delta_rot[2].
+        pan_delta = float(local_delta_rot[1]) * self.rot_sensitivity
+        pan_delta = float(np.clip(pan_delta, -_MAX_ROT_DELTA, _MAX_ROT_DELTA))
+        local_delta_rot = local_delta_rot.copy()
+        local_delta_rot[1] = 0.0  # already routed to shoulder_pan above; don't also twist the wrist
+
         gripper_delta_pos = _CONTROLLER_TO_GRIPPER_AXES @ local_delta_pos * self.pos_sensitivity
         gripper_delta_rot = _CONTROLLER_TO_GRIPPER_AXES @ local_delta_rot * self.rot_sensitivity
 
@@ -261,6 +276,7 @@ class SO101PicoController(Device):
 
         self._delta_action[0:3] = gripper_delta_pos
         self._delta_action[3:6] = gripper_delta_rot
+        self._delta_action[6] = pan_delta
 
         # advance the reference so next tick measures a fresh incremental delta
         self._ref_pos = pos
