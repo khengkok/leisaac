@@ -191,7 +191,11 @@ def make_https_server(page: str, http_port: int, ssl_context: ssl.SSLContext) ->
 
 
 async def run_ws_server(ws_port: int, ssl_context: ssl.SSLContext, pub: zmq.Socket):
+    count = 0
+
     async def handler(websocket):
+        nonlocal count
+        print(f"[bridge] browser connected from {websocket.remote_address}")
         async for raw in websocket:
             try:
                 data = json.loads(raw)
@@ -209,8 +213,16 @@ async def run_ws_server(ws_port: int, ssl_context: ssl.SSLContext, pub: zmq.Sock
                     data["valid"],
                 )
                 pub.send(msg, zmq.NOBLOCK)
-            except (json.JSONDecodeError, KeyError):
+                count += 1
+                if count % 60 == 0:
+                    print(
+                        f"[bridge] #{count} pos=({data['px']:.3f},{data['py']:.3f},{data['pz']:.3f}) "
+                        f"trigger={data['trigger']:.2f} grip={data['grip']:.2f} valid={data['valid']:.0f}"
+                    )
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f"[bridge] dropped malformed message: {e}")
                 continue
+        print("[bridge] browser disconnected")
 
     async with websockets.serve(handler, "0.0.0.0", ws_port, ssl=ssl_context):
         await asyncio.Future()  # run forever

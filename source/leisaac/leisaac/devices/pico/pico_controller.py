@@ -122,6 +122,7 @@ class SO101PicoController(Device):
         self._ref_quat = np.array([0.0, 0.0, 0.0, 1.0])
         self._have_prev_trigger = False
         self._prev_trigger = 0.0
+        self._tick_count = 0
 
         # initialize the target frame
         self.asset_name = "robot"
@@ -134,6 +135,7 @@ class SO101PicoController(Device):
         self.connect()
 
     def _recv_loop(self):
+        count = 0
         while self._connected:
             try:
                 msg = self._sub.recv(flags=0)  # blocks here, no lock held
@@ -146,7 +148,16 @@ class SO101PicoController(Device):
                         "grip": grip,
                         "valid": valid,
                     }
-            except Exception:
+                count += 1
+                if count == 1:
+                    print(f"[pico] first message received: pos=({px:.3f},{py:.3f},{pz:.3f}) valid={valid:.0f}")
+                elif count % 60 == 0:
+                    print(
+                        f"[pico] #{count} pos=({px:.3f},{py:.3f},{pz:.3f}) trigger={trigger:.2f} "
+                        f"grip={grip:.2f} valid={valid:.0f}"
+                    )
+            except Exception as e:
+                print(f"[pico] recv loop stopped: {e}")
                 break
 
     def connect(self):
@@ -186,6 +197,9 @@ class SO101PicoController(Device):
 
     def advance(self):
         self._update_action()
+        self._tick_count += 1
+        if self._tick_count % 60 == 0:
+            print(f"[pico] started(B pressed)={self.started} delta={np.round(self._delta_action, 4).tolist()}")
         return super().advance()
 
     def _update_action(self):
@@ -218,11 +232,14 @@ class SO101PicoController(Device):
         quat = state["quat"]
 
         if not valid or not grip_engaged:
+            if self._have_ref:
+                print(f"[pico] clutch disengaged (valid={valid}, grip={state['grip']:.2f})")
             self._have_ref = False
             return
 
         if not self._have_ref:
             # fresh engage (or regained tracking): take a reference sample, no motion yet
+            print(f"[pico] clutch engaged at pos=({pos[0]:.3f},{pos[1]:.3f},{pos[2]:.3f})")
             self._ref_pos = pos
             self._ref_quat = quat
             self._have_ref = True
