@@ -111,11 +111,14 @@ document.getElementById("startBtn").addEventListener("click", async () => {
       const gp = source.gamepad;
       const trigger = (gp && gp.buttons[0]) ? gp.buttons[0].value : 0.0;
       const grip = (gp && gp.buttons[1]) ? gp.buttons[1].value : 0.0;
+      const allButtons = gp ? gp.buttons.map(b => Number(b.value.toFixed(2))) : [];
+      const allAxes = gp ? gp.axes.map(a => Number(a.toFixed(2))) : [];
 
       const msg = {
         px: p.x, py: p.y, pz: p.z,
         qx: o.x, qy: o.y, qz: o.z, qw: o.w,
         trigger: trigger, grip: grip, valid: 1.0,
+        buttons: allButtons, axes: allAxes,
       };
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
       tracked = true;
@@ -192,39 +195,59 @@ def make_https_server(page: str, http_port: int, ssl_context: ssl.SSLContext) ->
 
 async def run_ws_server(ws_port: int, ssl_context: ssl.SSLContext, pub: zmq.Socket):
     count = 0
+    last_buttons = []
 
     async def handler(websocket):
-        nonlocal count
+        nonlocal count, last_buttons
         print(f"[bridge] browser connected from {websocket.remote_address}")
-        async for raw in websocket:
-            try:
-                data = json.loads(raw)
-                msg = struct.pack(
-                    "<10f",
-                    data["px"],
-                    data["py"],
-                    data["pz"],
-                    data["qx"],
-                    data["qy"],
-                    data["qz"],
-                    data["qw"],
-                    data["trigger"],
-                    data["grip"],
-                    data["valid"],
-                )
-                pub.send(msg, zmq.NOBLOCK)
-                count += 1
-                if count % 60 == 0:
-                    print(
-                        f"[bridge] #{count} pos=({data['px']:.3f},{data['py']:.3f},{data['pz']:.3f}) "
-                        f"trigger={data['trigger']:.2f} grip={data['grip']:.2f} valid={data['valid']:.0f}"
+        try:
+            async for raw in websocket:
+                try:
+                    data = json.loads(raw)
+                    msg = struct.pack(
+                        "<10f",
+                        data["px"],
+                        data["py"],
+                        data["pz"],
+                        data["qx"],
+                        data["qy"],
+                        data["qz"],
+                        data["qw"],
+                        data["trigger"],
+                        data["grip"],
+                        data["valid"],
                     )
-            except (json.JSONDecodeError, KeyError) as e:
-                print(f"[bridge] dropped malformed message: {e}")
-                continue
+                    pub.send(msg, zmq.NOBLOCK)
+                    count += 1
+
+                    # print immediately whenever any raw button/axis value changes noticeably,
+                    # so you can press one physical button at a time and see which index moves --
+                    # this is what tells us the real trigger/grip indices for the Pico profile.
+                    buttons = data.get("buttons", [])
+                    axes = data.get("axes", [])
+                    changed = len(buttons) != len(last_buttons) or any(
+                        abs(a - b) > 0.05 for a, b in zip(buttons, last_buttons)
+                    )
+                    if changed:
+                        print(f"[bridge] raw buttons={buttons} axes={axes}")
+                        last_buttons = buttons
+                    elif count % 60 == 0:
+                        print(
+                            f"[bridge] #{count} pos=({data['px']:.3f},{data['py']:.3f},{data['pz']:.3f}) "
+                            f"trigger={data['trigger']:.2f} grip={data['grip']:.2f} valid={data['valid']:.0f} "
+                            f"raw_buttons={buttons}"
+                        )
+                except (json.JSONDecodeError, KeyError) as e:
+                    print(f"[bridge] dropped malformed message: {e}")
+                    continue
+        except websockets.exceptions.ConnectionClosed as e:
+            print(f"[bridge] connection dropped ({e.__class__.__name__}) -- waiting for browser to reconnect")
         print("[bridge] browser disconnected")
 
-    async with websockets.serve(handler, "0.0.0.0", ws_port, ssl=ssl_context):
+    # tolerate brief Wi-Fi hiccups / the headset going idle instead of forcing a close
+    async with websockets.serve(
+        handler, "0.0.0.0", ws_port, ssl=ssl_context, ping_interval=20, ping_timeout=30, close_timeout=3
+    ):
         await asyncio.Future()  # run forever
 
 
